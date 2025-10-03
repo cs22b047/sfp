@@ -6,16 +6,19 @@
 #include <iostream>
 #include <algorithm>
 #include <ctime>
+#include <omp.h>
+#include <mutex>
+#include <map>
 #include <cstdint> 
 
 using namespace std;
 
-vector<unsigned long long> short_fastest_path(int V,int Vi, vector<vector<int>>& outgoing_edges, vector<vector<int>>& incoming_edges, vector<array<int,4>>& vertex_data, int source){
+vector<unsigned long long> short_fastest_path(int V,int Vi, vector<vector<int>>& outgoing_edges, vector<vector<int>>& incoming_edges, vector<array<int,4>>& vertex_data, int source, int no_threads){
     // Initialize data structures
     vector<int> current, next;
     vector<bool> visited(V, false);  // Visited vertices
     vector<pair<int,int>> LE(V,{-1,-1});  // List of pairs for each vertex
-    vector<unsigned long long> journey(Vi, ((unsigned long long)INT_MAX << 32) | (uint32_t)INT_MAX );  // (journey_time, total_travel_time
+    vector<unsigned long long> journey(Vi, ((unsigned long long)INT_MAX << 32) | (uint32_t)INT_MAX );  // (journey_time, total_travel_time)
     vector<int> in_cnt(V, 0);
     journey[source] = {0}; // Journey to self is (0,0)
     // Add all root vertices to current (vertices with no incoming edges)
@@ -68,15 +71,20 @@ vector<unsigned long long> short_fastest_path(int V,int Vi, vector<vector<int>>&
     return journey;
 }
 
+
 int main(int argc, char* argv[]) {
     if (argc < 4) {
-        cerr << "Usage: " << argv[0] << " <graph_file> <query_file> <output_file>" << endl;
+        cerr << "Usage: " << argv[0] << " <graph_file> <query_file> <output_file> [num_threads]" << endl;
         return 1;
     }
 
     string graph_filename = argv[1];
     string query_filename = argv[2];
     string output_filename = argv[3];
+    int no_threads = (argc > 4) ? atoi(argv[4]) : 1;
+    
+    // Set OpenMP thread count
+    omp_set_num_threads(no_threads);
 
     vector<int> start, adj;
     vector<array<int, 4>> edges;
@@ -137,6 +145,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    float totalTime, queryTime;
+    totalTime = 0;
+    double start_time, end_time;
     ofstream outFile(output_filename, ios::out | ios::trunc);
     if (!outFile) {
         cerr << "Error opening file for writing.\n";
@@ -144,11 +155,18 @@ int main(int argc, char* argv[]) {
     }
     
     for (int i = 0; i < queryVertices.size(); i++) {
-        vector<unsigned long long> result = short_fastest_path(E,V, outgoing_edges, incoming_edges, edges, queryVertices[i]);
+        start_time = omp_get_wtime();
+        vector<unsigned long long> result = short_fastest_path(E,V, outgoing_edges, incoming_edges, edges, queryVertices[i], no_threads);
+        end_time = omp_get_wtime();
+
         for (int j = 0; j < result.size(); j++) {
             outFile << queryVertices[i] << "--" << j << ": (" << ((result[j] >> 32) & 0xFFFFFFFF) << ", " << (result[j] & 0xFFFFFFFF) << ")\n";
         }
+        queryTime = (end_time - start_time);
+        totalTime += queryTime;
     }
     outFile.close();
+    float averageTime = (totalTime / queryVertices.size()) * 1000;
+    cout << "Average query time(" << output_filename << "):" << averageTime << " ms" << endl;
     return 0;
 }

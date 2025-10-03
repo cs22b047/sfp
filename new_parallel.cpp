@@ -27,6 +27,7 @@ vector<pair<int, int>> short_fastest_path(int V,int Vi, vector<vector<int>>& out
     mutex le_mutex;
     mutex next_mutex;
     
+    journey[source] = {0, 0}; // Journey to self is (0,0)
     // Add all root vertices to current (vertices with no incoming edges)
     for (int v = 0; v < V; v++) {
         if (incoming_edges[v].empty()) {
@@ -58,9 +59,9 @@ vector<pair<int, int>> short_fastest_path(int V,int Vi, vector<vector<int>>& out
             for (int i = start_idx; i < end_idx; i++) {
                 int v = current[i];
                 if(vertex_data[v]==array<int,4>{140, 139, 66480, 240}) {
-                    cout<<LE[v].first<<", "<<LE[v].second<<endl;
+                    //cout<<LE[v].first<<", "<<LE[v].second<<endl;
                 }
-                cout<<vertex_data[v][0]<<", "<<source<<endl;
+                //cout<<vertex_data[v][0]<<", "<<source<<endl;
                 // If vertex starts from source
 
                 if (vertex_data[v][0] == source) {
@@ -69,7 +70,7 @@ vector<pair<int, int>> short_fastest_path(int V,int Vi, vector<vector<int>>& out
                         LE[v] = pair<int,int>(vertex_data[v][2], vertex_data[v][3]);
                     }
                     if (vertex_data[v]==array<int,4>{140, 139, 66480, 240}) {
-                        cout<<LE[v].first<<", "<<LE[v].second<<endl;
+                        //cout<<LE[v].first<<", "<<LE[v].second<<endl;
                     }
                     {
                         lock_guard<mutex> lock(journey_mutex);
