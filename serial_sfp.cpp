@@ -27,8 +27,8 @@ vector<unsigned long long> short_fastest_path(int V,int Vi, vector<vector<int>>&
                 journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], ((unsigned long long)vertex_data[v][3] << 32) | (uint32_t)vertex_data[v][3]);
             }
             for(auto& it : outgoing_edges[v]) {
-                in_cnt[it]++;
-                if(!visited[it] && in_cnt[it]==incoming_edges[it].size()) {
+                in_cnt[it]++; // atomic in parallel
+                if(in_cnt[it]==incoming_edges[it].size()) {
                     visited[it] = true;
                     current.push_back(it);
                 }
@@ -43,22 +43,23 @@ vector<unsigned long long> short_fastest_path(int V,int Vi, vector<vector<int>>&
         for(int i=0;i<size;i++) {
             int v = current[i];
             for(auto& it : outgoing_edges[v]) {
-                in_cnt[it]++;
-                if(!visited[it] && in_cnt[it]==incoming_edges[it].size()){
-                    visited[it] = true;
+                in_cnt[it]++; // atomic
+                if(in_cnt[it]==incoming_edges[it].size()){
                     next.push_back(it);
                 }
             }
             if(vertex_data[v][0] == source) {
                 LE[v] = pair<int,int>(vertex_data[v][2], vertex_data[v][3]);
-                journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], ((unsigned long long)vertex_data[v][3] << 32) | (uint32_t)vertex_data[v][3]);
+                unsigned long long new_journey = ((unsigned long long)vertex_data[v][3] << 32) | (uint32_t)vertex_data[v][3];
+                journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], new_journey); // atomic
             }
             for(auto& u: incoming_edges[v]){
                 if(LE[u] == pair<int, int>(-1, -1)) continue;
                 if(LE[v] == pair<int, int>(-1, -1) || LE[u].first > LE[v].first || (LE[u].first == LE[v].first && LE[v].second > LE[u].second + vertex_data[v][3])){
                     LE[v] = pair<int, int>(LE[u].first, LE[u].second + vertex_data[v][3]);
                     int new_journey_time = vertex_data[v][2] + vertex_data[v][3] - LE[v].first;
-                    journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], ((unsigned long long)new_journey_time << 32) | (uint32_t)LE[v].second);
+                    unsigned long long new_journey = ((unsigned long long)new_journey_time << 32) | (uint32_t)LE[v].second;
+                    journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], new_journey); // atomic
                 }
             }
         }

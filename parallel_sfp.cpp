@@ -13,26 +13,26 @@
 
 using namespace std;
 
-vector<unsigned long long> short_fastest_path(int V,int Vi, vector<vector<int>>& outgoing_edges, vector<vector<int>>& incoming_edges, vector<array<int,4>>& vertex_data, int source, int no_threads){
+vector<unsigned long long> short_fastest_path(int V,int Vi, vector<vector<int>>& outgoing_edges, vector<vector<int>>& incoming_edges, vector<array<int,4>>& vertex_data, int source, int threads){
     // Initialize data structures
-    vector<int> current, next;
-    vector<bool> visited(V, false);  // Visited vertices
+    vector<int> current;
     vector<pair<int,int>> LE(V,{-1,-1});  // List of pairs for each vertex
     vector<unsigned long long> journey(Vi, ((unsigned long long)INT_MAX << 32) | (uint32_t)INT_MAX );  // (journey_time, total_travel_time)
     vector<int> in_cnt(V, 0);
     journey[source] = {0}; // Journey to self is (0,0)
+    // Thread-local next vectors for each thread
+    vector<vector<int>> thread_next(threads);
+    
     // Add all root vertices to current (vertices with no incoming edges)
     for (int v = 0; v < V; v++) {
         if (incoming_edges[v].empty()) {
-            visited[v] = true;
             if(vertex_data[v][0] == source) {
                 LE[v] = pair<int,int>(vertex_data[v][2], vertex_data[v][3]);
                 journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], ((unsigned long long)vertex_data[v][3] << 32) | (uint32_t)vertex_data[v][3]);
             }
             for(auto& it : outgoing_edges[v]) {
                 in_cnt[it]++;
-                if(!visited[it] && in_cnt[it]==incoming_edges[it].size()) {
-                    visited[it] = true;
+                if(in_cnt[it]==incoming_edges[it].size()) {
                     current.push_back(it);
                 }
             }
@@ -41,32 +41,90 @@ vector<unsigned long long> short_fastest_path(int V,int Vi, vector<vector<int>>&
     
     while (!current.empty()) {
         int size = current.size();
-        next.clear();
-        
-        for(int i=0;i<size;i++) {
-            int v = current[i];
-            for(auto& it : outgoing_edges[v]) {
-                in_cnt[it]++;
-                if(!visited[it] && in_cnt[it]==incoming_edges[it].size()){
-                    visited[it] = true;
-                    next.push_back(it);
+        // Clear thread-local next vectors and reset in_next flags
+        for (int t = 0; t < threads; t++) {
+            thread_next[t].clear();
+        }
+
+        #pragma omp parallel num_threads(threads)
+        {
+            int thread_id = omp_get_thread_num();
+            int chunk_size = (size + threads - 1) / threads; // Ceiling division
+            int start_idx = thread_id * chunk_size;
+            int end_idx = min(start_idx + chunk_size, size);
+            
+            for (int i = start_idx; i < end_idx; i++) {
+                int v = current[i];
+
+                // Process outgoing edges
+                for (auto& it : outgoing_edges[v]) {
+                    int prev_val;
+                    #pragma omp atomic capture
+                    prev_val = in_cnt[it]++;
+
+                    if (prev_val + 1 == (int)incoming_edges[it].size()) {
+                        thread_next[thread_id].push_back(it);
+                    }
                 }
-            }
-            if(vertex_data[v][0] == source) {
-                LE[v] = pair<int,int>(vertex_data[v][2], vertex_data[v][3]);
-                journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], ((unsigned long long)vertex_data[v][3] << 32) | (uint32_t)vertex_data[v][3]);
-            }
-            for(auto& u: incoming_edges[v]){
-                if(LE[u] == pair<int, int>(-1, -1)) continue;
-                if(LE[v] == pair<int, int>(-1, -1) || LE[u].first > LE[v].first || (LE[u].first == LE[v].first && LE[v].second > LE[u].second + vertex_data[v][3])){
-                    LE[v] = pair<int, int>(LE[u].first, LE[u].second + vertex_data[v][3]);
-                    int new_journey_time = vertex_data[v][2] + vertex_data[v][3] - LE[v].first;
-                    journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], ((unsigned long long)new_journey_time << 32) | (uint32_t)LE[v].second);
+            
+                // Source initialization
+                if (vertex_data[v][0] == source) {
+                    LE[v] = {vertex_data[v][2], vertex_data[v][3]};
+                    unsigned long long val = ((unsigned long long)vertex_data[v][3] << 32) | (uint32_t)vertex_data[v][3];
+
+                    // #pragma omp critical
+                    // {
+                    //    journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], val);
+                    // }
+                
+                    int idx = vertex_data[v][1];
+                    unsigned long long old_val;
+                                   
+                    do {
+                       #pragma omp atomic read
+                       old_val = journey[idx];
+                       if (val >= old_val) break;
+                       #pragma omp atomic write
+                       journey[idx] = val;
+                    } while (val < old_val);
+
+                }
+            
+                for (auto& u : incoming_edges[v]) {
+                    if (LE[u] == pair<int, int>(-1, -1)) continue;
+                    if (LE[v] == pair<int, int>(-1, -1) || LE[u].first > LE[v].first ||
+                        (LE[u].first == LE[v].first && LE[v].second > LE[u].second + vertex_data[v][3])) {
+                        
+                        LE[v] = {LE[u].first, LE[u].second + vertex_data[v][3]};
+                        int new_journey_time = vertex_data[v][2] + vertex_data[v][3] - LE[v].first;
+                        unsigned long long val = ((unsigned long long)new_journey_time << 32) | (uint32_t)LE[v].second;
+                        
+                        // #pragma omp critical
+                        // {
+                        //     journey[vertex_data[v][1]] = min(journey[vertex_data[v][1]], val);
+                        // }
+
+                        int idx = vertex_data[v][1];
+                        unsigned long long old_val;
+                                       
+                        do {
+                           #pragma omp atomic read
+                           old_val = journey[idx];
+                           if (val >= old_val) break;
+                           #pragma omp atomic write
+                           journey[idx] = val;
+                        } while (val < old_val);
+                    }
                 }
             }
         }
+
         current.clear();
-        current = next;
+        for (int t = 0; t < threads; t++) {
+            for (int vertex : thread_next[t]) {
+                    current.push_back(vertex);
+            }
+        }
     }
     return journey;
 }
